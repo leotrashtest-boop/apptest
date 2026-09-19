@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tirage Aléatoire</title>
+
+  <!-- 1. LIEN VERS LE MANIFESTE PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#121212">
+
+  <style>
+    :root {
+      --bg: #121212;
+      --card: #1e1e1e;
+      --accent: #bb86fc;
+      --text: #e0e0e0;
+      --danger: #cf6679;
+      --border: #333;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 16px; display: flex; flex-direction: column; min-height: 100vh; gap: 16px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    select, button, input, textarea { background: var(--card); color: var(--text); border: 1px solid var(--border); padding: 12px; border-radius: 8px; font-size: 16px; width: 100%; }
+    button { cursor: pointer; font-weight: bold; background: var(--border); touch-action: manipulation; }
+    button.primary { background: var(--accent); color: #000; border: none; }
+    button.danger { background: var(--danger); color: #000; border: none; }
+    .draw-section { background: var(--card); padding: 20px; border-radius: 12px; text-align: center; display: flex; flex-direction: column; gap: 16px; }
+    .result { font-size: 24px; font-weight: bold; min-height: 80px; display: flex; align-items: center; justify-content: center; padding: 12px; background: var(--bg); border-radius: 8px; word-break: break-word; }
+    .management { background: var(--card); padding: 16px; border-radius: 12px; display: flex; flex-direction: column; gap: 12px; }
+    .item-row { display: flex; gap: 8px; align-items: center; }
+    .item-row input { flex: 1; }
+    .item-row button { width: auto; padding: 12px 16px; }
+    .list-items { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; margin-top: 8px; }
+    .tabs { display: flex; gap: 8px; }
+    .tabs button { flex: 1; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <select id="listSelect" onchange="selectList()"></select>
+  </header>
+
+  <!-- Zone de tirage -->
+  <main class="draw-section">
+    <div id="resultDisplay" class="result">Sélectionnez une liste</div>
+    <button class="primary" style="padding: 20px; font-size: 20px;" onclick="drawRandom()">TIRER AU SORT</button>
+  </main>
+
+  <!-- Navigation Gestion -->
+  <div class="tabs">
+    <button onclick="toggleSection('editItems')">Gérer les notes</button>
+    <button onclick="toggleSection('editLists')">Gérer les listes</button>
+  </div>
+
+  <!-- Gestion des Notes -->
+  <section id="editItems" class="management hidden">
+    <h3>Notes de la liste</h3>
+    <div class="item-row">
+      <input type="text" id="newNoteInput" placeholder="Nouvelle note...">
+      <button class="primary" onclick="addNote()">+</button>
+    </div>
+    <div id="notesContainer" class="list-items"></div>
+  </section>
+
+  <!-- Gestion des Listes -->
+  <section id="editLists" class="management hidden">
+    <h3>Créer / Supprimer une liste</h3>
+    <div class="item-row">
+      <input type="text" id="newListInput" placeholder="Nom de la liste...">
+      <button class="primary" onclick="createList()">+</button>
+    </div>
+    <button class="danger" style="margin-top: 12px;" onclick="deleteCurrentList()">Supprimer la liste actuelle</button>
+  </section>
+
+  <script>
+    let DB = JSON.parse(localStorage.getItem('custom_random_db')) || {
+      currentListId: null,
+      lists: []
+    };
+
+    function save() {
+      localStorage.setItem('custom_random_db', JSON.stringify(DB));
+      render();
+    }
+
+    function render() {
+      const select = document.getElementById('listSelect');
+      select.innerHTML = '';
+
+      if (DB.lists.length === 0) {
+        select.innerHTML = '<option>Aucune liste</option>';
+        document.getElementById('resultDisplay').innerText = 'Créez une liste pour commencer';
+        document.getElementById('notesContainer').innerHTML = '';
+        return;
+      }
+
+      DB.lists.forEach(l => {
+        const opt = document.createElement('option');
+        opt.value = l.id;
+        opt.innerText = l.name;
+        if (l.id === DB.currentListId) opt.selected = true;
+        select.appendChild(opt);
+      });
+
+      renderNotes();
+    }
+
+    function getCurrentList() {
+      return DB.lists.find(l => l.id === DB.currentListId);
+    }
+
+    function selectList() {
+      DB.currentListId = document.getElementById('listSelect').value;
+      document.getElementById('resultDisplay').innerText = '...';
+      save();
+    }
+
+    function createList() {
+      const input = document.getElementById('newListInput');
+      const name = input.value.trim();
+      if (!name) return;
+
+      const newList = { id: Date.now().toString(), name: name, notes: [] };
+      DB.lists.push(newList);
+      DB.currentListId = newList.id;
+      input.value = '';
+      save();
+    }
+
+    function deleteCurrentList() {
+      if (!DB.currentListId) return;
+      DB.lists = DB.lists.filter(l => l.id !== DB.currentListId);
+      DB.currentListId = DB.lists.length > 0 ? DB.lists[0].id : null;
+      save();
+    }
+
+    function renderNotes() {
+      const container = document.getElementById('notesContainer');
+      container.innerHTML = '';
+      const list = getCurrentList();
+      if (!list) return;
+
+      list.notes.forEach((note, index) => {
+        const row = document.createElement('div');
+        row.className = 'item-row';
+        row.innerHTML = `
+          <input type="text" value="${note.replace(/"/g, '&quot;')}" onchange="updateNote(${index}, this.value)">
+          <button class="danger" onclick="deleteNote(${index})">X</button>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function addNote() {
+      const input = document.getElementById('newNoteInput');
+      const text = input.value.trim();
+      const list = getCurrentList();
+      if (!text || !list) return;
+
+      list.notes.push(text);
+      input.value = '';
+      save();
+    }
+
+    function updateNote(index, val) {
+      const list = getCurrentList();
+      if (!list) return;
+      list.notes[index] = val.trim();
+      save();
+    }
+
+    function deleteNote(index) {
+      const list = getCurrentList();
+      if (!list) return;
+      list.notes.splice(index, 1);
+      save();
+    }
+
+    function drawRandom() {
+      const list = getCurrentList();
+      const display = document.getElementById('resultDisplay');
+
+      if (!list || list.notes.length === 0) {
+        display.innerText = 'La liste est vide';
+        return;
+      }
+
+      const randomIndex = Math.floor(Math.random() * list.notes.length);
+      display.innerText = list.notes[randomIndex];
+    }
+
+    function toggleSection(id) {
+      const sec = document.getElementById(id);
+      const isHidden = sec.classList.contains('hidden');
+      document.getElementById('editItems').classList.add('hidden');
+      document.getElementById('editLists').classList.add('hidden');
+      if (isHidden) sec.classList.remove('hidden');
+    }
+
+    // Init au chargement
+    if (!DB.currentListId && DB.lists.length > 0) DB.currentListId = DB.lists[0].id;
+    render();
+
+    // 2. ENREGISTREMENT DU SERVICE WORKER
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+          .then(reg => console.log('Service Worker enregistré :', reg.scope))
+          .catch(err => console.error('Erreur enregistrement Service Worker :', err));
+      });
+    }
+  </script>
+</body>
+</html>
